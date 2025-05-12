@@ -1,0 +1,219 @@
+HW T 5 2 
+
+Завдання 2. Порівняння продуктивності HyperLogLog із точним підрахунком унікальних елементів
+
+pip install numpy pandas mmh3
+
+import re
+import time
+import mmh3
+import numpy as np
+import pandas as pd
+from urllib.request import urlopen
+from io import StringIO
+
+class HyperLogLog:
+    def __init__(self, p=14):
+        """
+        Ініціалізація HyperLogLog
+        
+        Args:
+            p (int): Параметр точності (2^p - кількість регістрів)
+        """
+        self.p = p
+        self.m = 1 << p  # Кількість регістрів (2^p)
+        self.registers = np.zeros(self.m, dtype=np.uint8)
+        self.alpha = self._get_alpha(self.m)
+        
+    def _get_alpha(self, m):
+        """
+        Визначення коефіцієнта корекції alpha
+        
+        Args:
+            m (int): Кількість регістрів
+            
+        Returns:
+            float: Коефіцієнт alpha
+        """
+        if m == 16:
+            return 0.673
+        elif m == 32:
+            return 0.697
+        elif m == 64:
+            return 0.709
+        else:
+            return 0.7213 / (1 + 1.079 / m)
+    
+    def add(self, item):
+        """
+        Додавання елемента до HyperLogLog
+        
+        Args:
+            item (str): Елемент для додавання
+        """
+        # Використовуємо MurmurHash для хешування
+        x = mmh3.hash64(item)[0]
+        
+        # Визначаємо індекс регістра (перші p біт)
+        j = x & (self.m - 1)
+        
+        # Визначаємо кількість нулів на початку (rank)
+        w = x >> self.p
+        rank = 1
+        while (w & 1) == 0 and rank <= 64 - self.p:
+            rank += 1
+            w >>= 1
+        
+        # Оновлюємо регістр, якщо нове значення більше
+        self.registers[j] = max(self.registers[j], rank)
+    
+    def count(self):
+        """
+        Оцінка кількості унікальних елементів
+        
+        Returns:
+            float: Оцінка кількості унікальних елементів
+        """
+        # Обчислюємо гармонічне середнє
+        sum_inv = np.sum(2 ** -self.registers)
+        
+        # Застосовуємо корекцію
+        E = self.alpha * self.m ** 2 / sum_inv
+        
+        # Коригуємо оцінку для малих і великих значень
+        if E <= 2.5 * self.m:
+            # Коректуємо для малих значень (кількість нульових регістрів)
+            zero_count = np.sum(self.registers == 0)
+            if zero_count > 0:
+                E = self.m * np.log(self.m / zero_count)
+                
+        # Коригуємо для великих значень (2^32 / 30)
+        if E > 2**32 / 30:
+            E = -2**32 * np.log(1 - E / 2**32)
+            
+        return E
+
+def load_log_data(file_url):
+    """
+    Завантаження та обробка лог-файлів
+    
+    Args:
+        file_url (str): URL-адреса файлу
+        
+    Returns:
+        list: Список IP-адрес
+    """
+    # Завантажуємо дані
+    response = urlopen(file_url)
+    data = response.read().decode('utf-8')
+    
+    # Регулярний вираз для виділення IP-адрес
+    ip_pattern = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+    ip_addresses = []
+    
+    # Обробляємо кожний рядок
+    for line in data.split('\n'):
+        try:
+            match = re.search(ip_pattern, line)
+            if match:
+                ip_addresses.append(match.group(0))
+        except Exception:
+            # Ігноруємо некоректні рядки
+            continue
+    
+    return ip_addresses
+
+def exact_count_unique(items):
+    """
+    Точний підрахунок унікальних елементів
+    
+    Args:
+        items (list): Список елементів
+        
+    Returns:
+        int: Кількість унікальних елементів
+    """
+    start_time = time.time()
+    unique_count = len(set(items))
+    elapsed_time = time.time() - start_time
+    
+    return unique_count, elapsed_time
+
+def hll_count_unique(items, p=14):
+    """
+    Підрахунок унікальних елементів за допомогою HyperLogLog
+    
+    Args:
+        items (list): Список елементів
+        p (int): Параметр точності
+        
+    Returns:
+        float: Оцінка кількості унікальних елементів
+    """
+    start_time = time.time()
+    hll = HyperLogLog(p=p)
+    for item in items:
+        hll.add(item)
+    
+    unique_count = hll.count()
+    elapsed_time = time.time() - start_time
+    
+    return unique_count, elapsed_time
+
+def compare_methods(file_url):
+    """
+    Порівняння методів підрахунку унікальних елементів
+    
+    Args:
+        file_url (str): URL-адреса файлу
+    """
+    print("Завантаження даних...")
+    ip_addresses = load_log_data(file_url)
+    print(f"Завантажено {len(ip_addresses)} записів")
+    
+    print("\nПорівняння методів:")
+    
+    # Точний підрахунок
+    exact_count, exact_time = exact_count_unique(ip_addresses)
+    
+    # HyperLogLog
+    hll_count, hll_time = hll_count_unique(ip_addresses)
+    
+    # Обчислюємо похибку
+    error = abs(hll_count - exact_count) / exact_count * 100
+    
+    # Створюємо таблицю результатів
+    results = {
+        "Метод": ["Точний підрахунок", "HyperLogLog"],
+        "Унікальні елементи": [exact_count, round(hll_count, 1)],
+        "Час виконання (сек.)": [round(exact_time, 3), round(hll_time, 3)],
+    }
+    
+    # Виводимо результати
+    df = pd.DataFrame(results)
+    df.set_index("Метод", inplace=True)
+    print(df)
+    
+    print(f"\nПохибка HyperLogLog: {error:.2f}%")
+
+if __name__ == "__main__":
+    # URL-адреса файлу
+    file_url = "https://drive.google.com/uc?id=13NUCSG7l_z2B7gYuQubYIpIjJTnwOAOb"
+    
+    # Порівняння методів
+    compare_methods(file_url)
+
+
+
+
+
+
+Завантажено 29553 записів
+
+Порівняння методів:
+                   Унікальні елементи  Час виконання (сек.)
+Метод                                                      
+Точний підрахунок                28.0                 0.002
+HyperLogLog                      27.0                 0.058
+
+Похибка HyperLogLog: 3.49%
