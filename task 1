@@ -1,0 +1,126 @@
+HW T 5 1 
+
+Завдання 1. Перевірка унікальності паролів за допомогою фільтра Блума
+
+import hashlib
+
+class BloomFilter:
+    def __init__(self, size, num_hashes):
+        """
+        Ініціалізація фільтра Блума
+        
+        Args:
+            size (int): Розмір бітового масиву
+            num_hashes (int): Кількість хеш-функцій
+        """
+        self.size = size
+        self.num_hashes = num_hashes
+        self.bit_array = [False] * size
+        
+    def _hash(self, item, seed):
+        """
+        Допоміжна функція для створення різних хеш-значень
+        
+        Args:
+            item (str): Елемент для хешування
+            seed (int): Сід для хеш-функції
+        
+        Returns:
+            int: Індекс у бітовому масиві
+        """
+        # Використовуємо hashlib для створення хеш-значення
+        hash_obj = hashlib.md5(f"{item}{seed}".encode())
+        # Отримуємо позицію в бітовому масиві
+        return int(hash_obj.hexdigest(), 16) % self.size
+    
+    def add(self, item):
+        """
+        Додати елемент до фільтра Блума
+        
+        Args:
+            item (str): Елемент для додавання
+        """
+        if not item or not isinstance(item, str):
+            return  # Ігноруємо порожні або некоректні значення
+        
+        # Встановлюємо біти для кожної хеш-функції
+        for i in range(self.num_hashes):
+            index = self._hash(item, i)
+            self.bit_array[index] = True
+    
+    def check(self, item):
+        """
+        Перевірити, чи елемент може бути у фільтрі
+        
+        Args:
+            item (str): Елемент для перевірки
+        
+        Returns:
+            bool: True, якщо елемент може бути у фільтрі, False - якщо точно відсутній
+        """
+        if not item or not isinstance(item, str):
+            return False  # Порожні або некоректні значення не можуть бути у фільтрі
+        
+        # Перевіряємо, чи всі біти встановлені
+        for i in range(self.num_hashes):
+            index = self._hash(item, i)
+            if not self.bit_array[index]:
+                return False  # Якщо хоча б один біт не встановлений, елемент точно відсутній
+        
+        # Якщо всі біти встановлені, елемент може бути у фільтрі (можливо хибнопозитивний результат)
+        return True
+
+def check_password_uniqueness(bloom_filter, passwords):
+    """
+    Перевірка унікальності паролів за допомогою фільтра Блума
+    
+    Args:
+        bloom_filter (BloomFilter): Екземпляр фільтра Блума з існуючими паролями
+        passwords (list): Список паролів для перевірки
+    
+    Returns:
+        dict: Словник з результатами перевірки для кожного пароля
+    """
+    results = {}
+    
+    for password in passwords:
+        if not password or not isinstance(password, str):
+            results[password] = "некоректний пароль"
+            continue
+            
+        # Перевіряємо, чи пароль вже використовувався
+        if bloom_filter.check(password):
+            results[password] = "вже використаний"
+        else:
+            results[password] = "унікальний"
+            # Додаємо пароль до фільтра, оскільки він тепер використаний
+            bloom_filter.add(password)
+    
+    return results
+
+
+if __name__ == "__main__":
+    # Ініціалізація фільтра Блума
+    bloom = BloomFilter(size=1000, num_hashes=3)
+
+    # Додавання існуючих паролів
+    existing_passwords = ["password123", "admin123", "qwerty123"]
+    for password in existing_passwords:
+        bloom.add(password)
+
+    # Перевірка нових паролів
+    new_passwords_to_check = ["password123", "newpassword", "admin123", "guest"]
+    results = check_password_uniqueness(bloom, new_passwords_to_check)
+
+    # Виведення результатів
+    for password, status in results.items():
+        print(f"Пароль '{password}' - {status}.") 
+
+
+
+
+
+Пароль 'password123' - вже використаний.
+Пароль 'newpassword' - унікальний.
+Пароль 'admin123' - вже використаний.
+Пароль 'guest' - унікальний.
